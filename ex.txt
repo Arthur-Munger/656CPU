@@ -43,15 +43,16 @@ module EX(
     wire [2:0] sel_alu_src1;
     wire [3:0] sel_alu_src2;
     wire data_ram_en;
-    wire [3:0] data_ram_wen;
+    wire [3:0] data_ram_sel;
     wire rf_we;
     wire [4:0] rf_waddr;
     wire sel_rf_res;
     wire [31:0] rf_rdata1, rf_rdata2;
-    wire mul_div_signed,op_mul, op_div;
+    wire mul_div_signed,op_mul, op_div, real_data_ram_wen;
     reg is_in_delayslot;
 
     assign {
+        real_data_ram_wen,
         mul_div_signed,  //161
         op_mul,         //160 
         op_div,         //159
@@ -61,7 +62,7 @@ module EX(
         sel_alu_src1,   // 82:80
         sel_alu_src2,   // 79:76
         data_ram_en,    // 75
-        data_ram_wen,   // 74:71
+        data_ram_sel,   // 74:71
         rf_we,          // 70
         rf_waddr,       // 69:65
         sel_rf_res,     // 64
@@ -78,10 +79,21 @@ module EX(
 
     wire [31:0] alu_src1, alu_src2;
     wire [31:0] alu_result, ex_result;
+    wire [3:0] data_ram_b, data_ram_h, data_ram_w, data_ram_selected;
+    assign data_ram_b = (ex_result[1:0] == 2'b00) ? 4'b0001 : 
+                           (ex_result[1:0] == 2'b01) ? 4'b0010 :
+                            (ex_result[1:0] == 2'b10) ? 4'b0100 : 4'b1000;
+    assign data_ram_h = (ex_result[1:0] == 2'b00) ? 4'b0011 : 4'b1100;
+    assign data_ram_w = 4'b1111;
     assign data_sram_en = data_ram_en;
-    assign data_sram_wen = data_ram_wen;
+    assign data_ram_selected = {4{data_ram_sel[0]}} & data_ram_w 
+                               | {4{data_ram_sel[1]}} & data_ram_h
+                                | {4{data_ram_sel[2]}} & data_ram_b;
+    assign data_sram_wen = real_data_ram_wen ? data_ram_selected : 4'b0;
     assign data_sram_addr = ex_result;
-    assign data_sram_wdata = rf_rdata2;
+    assign data_sram_wdata = ({32{data_ram_sel[0]}} & rf_rdata2) 
+                             | ({32{data_ram_sel[1]}} & {2{rf_rdata2[15:0]}}) 
+                             | ({32{data_ram_sel[2]}} & {4{rf_rdata2[7:0]}});
 
     assign alu_src1 = sel_alu_src1[1] ? ex_pc :
                       sel_alu_src1[2] ? sa_zero_extend : rf_rdata1;
@@ -227,9 +239,10 @@ module EX(
     assign ex_rf_data = ex_result;
 
     assign ex_to_mem_bus = {
+        data_ram_sel,
         ex_pc,          // 75:44
         data_ram_en,    // 43
-        data_ram_wen,   // 42:39
+        data_ram_selected,   // 42:39
         sel_rf_res,     // 38
         rf_we,          // 37
         rf_waddr,       // 36:32
